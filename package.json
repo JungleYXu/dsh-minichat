@@ -1,0 +1,60 @@
+{
+  "name": "dsh-minichat",
+  "version": "0.1.0-beta.1",
+  "description": "Quick chat panel for DeepSeek Harness: one model call with only its own last 10 turns — no session, no tools, no context growth in the main conversation.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "minichat",
+    "panel",
+    "chat"
+  ],
+  "author": "JungleYXu",
+  "license": "MIT",
+  "homepage": "https://github.com/JungleYXu/dsh-minichat#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JungleYXu/dsh-minichat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JungleYXu/dsh-minichat/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "manifestVersion": 1
+  }
+}
