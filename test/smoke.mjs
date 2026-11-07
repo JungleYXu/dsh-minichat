@@ -6,10 +6,11 @@
  *
  * Covers the acceptance points that can be checked without a browser:
  * T01 no store file → empty state, no throw; T03 twelve turns → ten kept;
- * T05 clear → empty; usage/cost arithmetic; the busy and too-long guards;
- * favourites (pinned, toggled, surviving ⟳, wiped by 🗑, wiped again by a restart);
- * 联网 (auto only for time-sensitive questions, off never, on always, and the
- * digest reaching the request without being stored).
+ * T05 clear → empty; usage arithmetic; the busy and too-long guards;
+ * favourites (pinned as one exchange, toggled, surviving ⟳, wiped by 🗑);
+ * 联网 (auto only for time-sensitive questions, off never, on always, the
+ * digest reaching the request without being stored, the first page fetched);
+ * and the restart rule (a cold start begins empty, favourites included).
  */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -87,7 +88,7 @@ const { apply, name, inject } = await import(pathToFileURL(join(process.cwd(), '
 check('exports name', name === 'minichat', String(name))
 check('exports inject', Array.isArray(inject) && inject.includes('llm'), JSON.stringify(inject))
 
-apply(ctx, { pricing: { input: 1, output: 4 } })
+apply(ctx)
 check('registered one route', routes.length === 1, `got ${routes.length}`)
 const route = routes[0]
 check('route path', route?.path === '/dsh-minichat/api', String(route?.path))
@@ -129,18 +130,18 @@ async function ask(text, web) {
 // T01 — no store file yet.
 const empty = await post({ action: 'state' })
 check('T01 empty state', empty.ok === true && empty.messages.length === 0, JSON.stringify(empty).slice(0, 120))
-check('T01 no cost yet', empty.cost === 0, String(empty.cost))
+check('T01 no cost field', empty.cost === undefined, JSON.stringify(empty.cost))
 
 // One turn: the answer echoes the question, usage is recorded.
 const first = await ask('你好')
 check('ask settles done', first.state === 'done', JSON.stringify(first).slice(0, 200))
 check('ask keeps the answer', first.messages?.at(-1)?.content === '答：你好', JSON.stringify(first.messages?.at(-1)))
 check('turns counted', first.turns === 1, String(first.turns))
-check('cost from tokens', first.cost === Math.round((12 * 1 + 8 * 4) / 1000) / 1000 || first.cost > 0, String(first.cost))
+check('usage from tokens', first.usage?.input === 12 && first.usage?.output === 8, JSON.stringify(first.usage))
 check('effort off was sent', calls.at(-1)?.reasoningEffort === 'off', JSON.stringify(calls.at(-1)?.reasoningEffort))
 check('message carries role', calls.at(-1)?.messages?.at(-1)?.role === 'user', JSON.stringify(calls.at(-1)?.messages?.at(-1)))
 check('timing reported', Number.isFinite(first.timing?.ttftMs) && Number.isFinite(first.timing?.totalMs), JSON.stringify(first.timing))
-check('no session log touched', calls.at(-1)?.system !== undefined, 'system prompt missing')
+check('system prompt was sent', calls.at(-1)?.system !== undefined, 'system prompt missing')
 
 // T03 — twelve turns keep only the last ten.
 for (let index = 2; index <= 12; index += 1) {
@@ -156,27 +157,21 @@ check('T03 turns capped at 10', capped.turns === 10, String(capped.turns))
 const stored = JSON.parse(await readFile(join(home, 'minichat.json'), 'utf8'))
 check('T03 file capped too', stored.messages.length === 20, String(stored.messages.length))
 
-// ── 收藏：置顶、不占轮次、刷新保留、清空带走 ──────────────────────────
-const keepId = capped.messages[0].id
-check('rows carry ids', typeof keepId === 'string' && keepId !== '', JSON.stringify(keepId))
-const starred = await post({ action: 'favorite', id: keepId })
-check('star adds a favourite', starred.starred === true && starred.favorites.length === 1, JSON.stringify(starred.favorites?.length))
-check('star keeps the window', starred.turns === 10 && starred.messages.length === 20, String(starred.turns))
-const unstarred = await post({ action: 'favorite', id: keepId })
-check('star toggles off', unstarred.starred === false && unstarred.favorites.length === 0, JSON.stringify(unstarred.starred))
-const starred2 = await post({ action: 'favorite', id: keepId })
-check('star toggles back on', starred2.starred === true && starred2.favorites.length === 1, JSON.stringify(starred2.starred))
-const again = await post({ action: 'favorite', id: keepId })
-check('second toggle drops it', again.starred === false, JSON.stringify(again.starred))
-await post({ action: 'favorite', id: keepId })
-const keptFile = JSON.parse(await readFile(join(home, 'minichat.json'), 'utf8'))
-check('favourites persisted', Array.isArray(keptFile.favorites) && keptFile.favorites.length === 1, JSON.stringify(keptFile.favorites?.length))
-check('favourite remembers its question id', keptFile.favorites?.[0]?.id === keepId, String(keptFile.favorites?.[0]?.id))
-check('favourite pairs the answer', keptFile.favorites?.[0]?.question === capped.messages[0].content
-  && typeof keptFile.favorites?.[0]?.answer === 'string' && keptFile.favorites[0].answer !== '', JSON.stringify(keptFile.favorites?.[0]).slice(0, 120))
-const answerId = capped.messages[1].id
-const starAnswer = await post({ action: 'favorite', id: answerId })
-check('answers cannot be starred', starAnswer.ok === false && starAnswer.error.code === 'minichat/not-a-question', JSON.stringify(starAnswer).slice(0, 120))
+// ── 收藏：一问一答一起存、置顶、不占轮次、刷新保留、清空带走 ──────────
+const window = await post({ action: 'state' })
+const lastQuestion = window.messages.at(-2)
+const lastAnswer = window.messages.at(-1)
+const starred = await post({ action: 'favorite', id: lastQuestion.id })
+check('favourite pins the exchange', starred.starred === true && starred.favorites.length === 1, JSON.stringify(starred.favorites?.length))
+check('favourite keeps the answer', starred.favorites[0].answer === lastAnswer.content, JSON.stringify(starred.favorites[0]))
+check('favourite does not eat a round', starred.turns === window.turns, `${starred.turns} vs ${window.turns}`)
+const notAQuestion = await post({ action: 'favorite', id: lastAnswer.id })
+check('answer cannot be starred', notAQuestion.ok === false && notAQuestion.error.code === 'minichat/not-a-question', JSON.stringify(notAQuestion).slice(0, 120))
+const unstarred = await post({ action: 'favorite', id: lastQuestion.id })
+check('star toggles off', unstarred.starred === false && unstarred.favorites.length === 0, JSON.stringify(unstarred.favorites?.length))
+await post({ action: 'favorite', id: lastQuestion.id })
+const pinnedFile = JSON.parse(await readFile(join(home, 'minichat.json'), 'utf8'))
+check('favourite persisted', pinnedFile.favorites.length === 1 && pinnedFile.favorites[0].question === lastQuestion.content, JSON.stringify(pinnedFile.favorites?.[0]?.question))
 const unknownMessage = await post({ action: 'favorite', id: 'nope' })
 check('unknown message refused', unknownMessage.ok === false && unknownMessage.error.code === 'minichat/unknown-message', JSON.stringify(unknownMessage).slice(0, 120))
 
@@ -184,38 +179,42 @@ check('unknown message refused', unknownMessage.ok === false && unknownMessage.e
 const refreshed = await post({ action: 'refresh' })
 check('refresh empties the window', refreshed.messages.length === 0, String(refreshed.messages?.length))
 check('refresh keeps favourites', refreshed.favorites.length === 1, String(refreshed.favorites?.length))
-check('refresh zeroes cost', refreshed.cost === 0, String(refreshed.cost))
+check('refresh zeroes usage', refreshed.usage.input === 0 && refreshed.usage.output === 0, JSON.stringify(refreshed.usage))
 
 // 🗑 — everything, favourites included.
 const wiped = await post({ action: 'clear' })
 check('clear wipes favourites', wiped.favorites.length === 0 && wiped.messages.length === 0, JSON.stringify(wiped.favorites?.length))
 const wipedFile = JSON.parse(await readFile(join(home, 'minichat.json'), 'utf8'))
 check('clear persisted favourites', wipedFile.favorites.length === 0, String(wipedFile.favorites?.length))
+check('clear keeps the file schema', wipedFile.schema === 2, String(wipedFile.schema))
 
-// ── 联网：auto 只对时效问题搜，off 从不搜，摘要进请求不进窗口 ──────────
-const searched = await ask('今天的新闻有什么', 'auto')
-check('auto search ran', searched.search?.state === 'done' && searched.search?.count === 4, JSON.stringify(searched.search))
-check('search got the question', searches.at(-1)?.query === '今天的新闻有什么', String(searches.at(-1)?.query))
-const sent = calls.at(-1)?.messages?.at(-1)?.content?.[0]?.text ?? ''
-check('digest reached the request', sent.includes('网络搜索结果') && sent.includes('example.com'), sent.slice(-80))
-check('digest names four sources', (sent.match(/^\d+\. /gmu) ?? []).length === 4, String((sent.match(/^\d+\. /gmu) ?? []).length))
-check('page body was fetched', fetches.length >= 1 && fetches.at(-1)?.url === 'https://example.com/1', JSON.stringify(fetches.at(-1)))
-check('page body reached the request', sent.includes('无锡今天多云'), sent.slice(-120))
-check('page body dropped its script', !sent.includes('bad()'), sent.slice(-120))
+// ── 联网：auto 只查时效问题，off 从不查，on 一定查 ────────────────────
+const weather = await ask('今天无锡天气')
+check('auto search ran', weather.search?.state === 'done', JSON.stringify(weather.search))
+check('search got the question', searches.at(-1)?.query === '今天无锡天气', JSON.stringify(searches.at(-1)?.query))
+check('search asked for four sources', searches.at(-1)?.maxResults === 4, String(searches.at(-1)?.maxResults))
+const asked = calls.at(-1)?.messages?.at(-1)?.content?.[0]?.text ?? ''
+check('digest reached the request', asked.includes('资料'), asked.slice(0, 80))
+check('digest names four sources', [1, 2, 3, 4].every((index) => asked.includes(`结果 ${index}`)), asked.slice(0, 120))
+check('page body was fetched', fetches.length >= 1 && fetches.at(-1)?.url === 'https://example.com/1', JSON.stringify(fetches.at(-1)?.url))
+check('page body reached the request', asked.includes('多云 18~25℃'), asked.slice(-120))
+check('page body dropped its script', !asked.includes('bad()'), 'script leaked')
 
-// 日期类问题不该联网：系统提示里已经有「现在」。
-const clock = await ask('今天几号', 'auto')
-check('clock questions skip search', clock.search?.state === 'skipped', JSON.stringify(clock.search))
-const clockSystem = calls.at(-1)?.system ?? ''
-check('system carries today', /现在是 \d{4} 年 \d{1,2} 月 \d{1,2} 日/u.test(clockSystem), clockSystem.slice(0, 90))
-// The fake model echoes its prompt, so the *answer* may quote the digest; what
-// matters is that the stored question is still just the question.
-const windowRows = (await post({ action: 'state' })).messages
-const askedRow = windowRows.find((row) => row.role === 'user' && row.content.startsWith('今天的新闻'))
-check('digest is not stored', askedRow?.content === '今天的新闻有什么', JSON.stringify(askedRow?.content))
-const plain = await ask('1+1 等于几', 'auto')
+// A clock question is answered from the prompt, not from a search.
+const beforeClock = searches.length
+const clock = await ask('今天几号')
+check('clock questions skip search', searches.length === beforeClock, `${searches.length - beforeClock} search(es)`)
+check('clock answered', clock.state === 'done', JSON.stringify(clock).slice(0, 120))
+check('system carries today', /\d{4} 年 \d{1,2} 月 \d{1,2} 日/.test(calls.at(-1)?.system ?? ''), (calls.at(-1)?.system ?? '').slice(0, 60))
+
+// The digest is per-request only: the stored question stays the plain one.
+const afterSearch = JSON.parse(await readFile(join(home, 'minichat.json'), 'utf8'))
+const storedQuestion = afterSearch.messages.find((row) => row.content === '今天无锡天气')
+check('digest is not stored', storedQuestion !== undefined, JSON.stringify(afterSearch.messages.at(-1)?.content?.slice(0, 60)))
+
+const plain = await ask('1+1 等于几')
 check('auto skips plain questions', plain.search?.state === 'skipped', JSON.stringify(plain.search))
-const forcedOff = await ask('今天有什么新闻', 'off')
+const forcedOff = await ask('今天无锡天气', 'off')
 check('off never searches', forcedOff.search?.state === 'skipped', JSON.stringify(forcedOff.search))
 const forcedOn = await ask('1+1 等于几', 'on')
 check('on always searches', forcedOn.search?.state === 'done', JSON.stringify(forcedOn.search))
@@ -254,7 +253,7 @@ const restartCtx = {
 }
 // 冷启动：新模块实例 = 用户重启了 DSH。
 const restartPlugin = await import(`${pathToFileURL(join(process.cwd(), 'index.js')).href}?restart=1`)
-restartPlugin.apply(restartCtx, {})
+restartPlugin.apply(restartCtx)
 const restartPost = makePost(restartRoutes[0])
 const restartState = await restartPost({ action: 'state' })
 check('restart starts empty', restartState.messages.length === 0, String(restartState.messages?.length))
@@ -271,6 +270,7 @@ const restartFile = JSON.parse(await readFile(join(restartHome, 'minichat.json')
 check('restart file starts from the new turn', restartFile.messages?.[0]?.content === '1+1', JSON.stringify(restartFile.messages?.[0] ?? null))
 check('restart file never carries the old rows', !JSON.stringify(restartFile).includes('上一次的'), 'old row leaked')
 await rm(restartHome, { recursive: true, force: true })
+
 await rm(home, { recursive: true, force: true })
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

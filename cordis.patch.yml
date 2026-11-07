@@ -1,13 +1,7 @@
 # The configuration row this bundle contributes when a profile lists it.
 #
-# `pricing` is only used to turn the panel's token count into a rough ¥ figure.
-# It is an estimate on purpose — neither the panel nor this file claims to know
-# the real rate; override the row from the profile's own cordis.patch.yml
-# (row id `minichat`) when the price list changes.
+# The panel takes no configuration of its own: the model comes from the
+# profile's default selection, and the rolling window is fixed in the code.
 - insert:
     - id: minichat
       name: dsh-minichat
-      config:
-        pricing:
-          input: 1
-          output: 4

@@ -46,7 +46,6 @@ window.__ModuleLoader__.load({
       search: undefined,
       error: undefined,
       notice: undefined,
-      cost: 0,
       timing: undefined,
       turns: 0,
       maxTurns: 10,
@@ -97,7 +96,6 @@ window.__ModuleLoader__.load({
         ready: true,
         messages: Array.isArray(result.messages) ? result.messages : [],
         favorites: Array.isArray(result.favorites) ? result.favorites : [],
-        cost: Number(result.cost ?? 0),
         turns: Number(result.turns ?? 0),
         maxTurns: Number(result.maxTurns ?? 10),
       })
@@ -204,7 +202,7 @@ window.__ModuleLoader__.load({
       stopPolling()
       patch({
         messages: [], streaming: '', running: false, error: undefined, search: undefined,
-        cost: 0, turns: 0, timing: undefined, view: 'all', armed: false,
+        turns: 0, timing: undefined, view: 'all', armed: false,
       })
       try {
         absorb(await post({ action: 'refresh' }))
@@ -223,7 +221,7 @@ window.__ModuleLoader__.load({
       stopPolling()
       patch({
         messages: [], favorites: [], streaming: '', running: false, error: undefined,
-        search: undefined, cost: 0, turns: 0, timing: undefined, view: 'all', armed: false,
+        search: undefined, turns: 0, timing: undefined, view: 'all', armed: false,
       })
       try {
         absorb(await post({ action: 'clear' }))
@@ -631,11 +629,13 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const cost = state.cost > 0 ? `≈¥${state.cost.toFixed(4)}` : '≈¥0'
       const pace = state.timing === undefined
         ? ''
-        : ` · 首字 ${(state.timing.ttftMs / 1000).toFixed(1)}s / 共 ${(state.timing.totalMs / 1000).toFixed(1)}s`
-      const searched = state.timing?.searchMs > 0 ? ` · 联网 ${(state.timing.searchMs / 1000).toFixed(1)}s` : ''
+        : `首字 ${(state.timing.ttftMs / 1000).toFixed(1)}s / 共 ${(state.timing.totalMs / 1000).toFixed(1)}s`
+      const searched = state.timing?.searchMs > 0 ? `联网 ${(state.timing.searchMs / 1000).toFixed(1)}s` : ''
+      const meta = [pace, searched, `${state.turns}/${state.maxTurns} 轮`]
+        .filter((part) => part !== '')
+        .join(' · ')
       const pinBar = state.view === 'all' && state.favorites.length > 0
         ? h('div', { style: styles.pinBar },
           h('span', { style: { color: C.gold } }, '★'),
@@ -744,7 +744,7 @@ window.__ModuleLoader__.load({
             : null),
 
         h('div', { style: styles.foot },
-          h('span', null, `本次 ${cost}${searched}${pace} · ${state.turns}/${state.maxTurns} 轮`),
+          h('span', null, meta),
           h('span', { style: { flex: 1 } }),
           state.notice === undefined ? null : h('span', { style: { color: state.armed === true ? '#b91c1c' : C.muted } }, state.notice),
           h('button', {

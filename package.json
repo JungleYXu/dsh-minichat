@@ -1,6 +1,6 @@
 {
   "name": "dsh-minichat",
-  "version": "0.1.0-beta.1",
+  "version": "1.0.0",
   "description": "Quick chat panel for DeepSeek Harness: one model call with only its own last 10 turns — no session, no tools, no context growth in the main conversation.",
   "type": "module",
   "main": "./index.js",
@@ -14,6 +14,7 @@
     "client.js",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [

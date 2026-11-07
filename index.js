@@ -195,11 +195,7 @@ function readJson(req, limit = 65536) {
   })
 }
 
-export function apply(ctx, config = {}) {
-  /** 元 / 百万 token，仅用于「本次 ≈¥」这一行的估算。 */
-  const priceIn = Number.isFinite(config?.pricing?.input) ? config.pricing.input : 1
-  const priceOut = Number.isFinite(config?.pricing?.output) ? config.pricing.output : 4
-
+export function apply(ctx) {
   let book = emptyBook()
   let sequence = 0
   /** The one turn that can be running; the panel has a single input box. */
@@ -461,12 +457,6 @@ export function apply(ctx, config = {}) {
     warn(`dsh-minichat: 调用失败 [${code}] ${detail}`)
   }
 
-  /** Total 元 for the whole window, from the two token buckets we track. */
-  function costOf(usage) {
-    const value = (usage.input * priceIn + usage.output * priceOut) / 1_000_000
-    return Math.round(value * 1_000_000) / 1_000_000
-  }
-
   async function payload() {
     const store = await ensureBook()
     const favorites = [...store.favorites].sort((a, b) => b.starredAt - a.starredAt)
@@ -475,7 +465,6 @@ export function apply(ctx, config = {}) {
       messages: store.messages,
       favorites,
       usage: store.usage,
-      cost: costOf(store.usage),
       turns: Math.floor(store.messages.length / 2),
       maxTurns: MAX_TURNS,
       running: run.state === 'thinking',
